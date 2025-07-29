@@ -1,0 +1,592 @@
+# Guía para usar XBuilder y XSender con la SUNAT
+
+Esta guía explica cómo utilizar las librerías XBuilder y XSender para crear y enviar documentos electrónicos a la SUNAT en Perú.
+
+## Documentos Soportados
+
+La guía cubrirá los siguientes documentos:
+
+- Boleta
+- Factura
+- Nota de Crédito
+- Nota de Débito
+- Baja de Documentos
+- Resumen Diario
+- Percepción
+- Retención
+- Guía de Remisión
+
+## Estructura del Proyecto
+
+Para utilizar XBuilder y XSender, necesitarás un proyecto Java (por ejemplo, Maven o Gradle) y agregar las dependencias correspondientes.
+
+### Dependencias de Maven
+
+```xml
+<dependencies>
+    <!-- Para crear los XMLs -->
+    <dependency>
+        <groupId>io.github.project-openubl</groupId>
+        <artifactId>xbuilder</artifactId>
+        <version>5.0.3-SNAPSHOT</version>
+    </dependency>
+
+    <!-- Para enviar los documentos a la SUNAT -->
+    <dependency>
+        <groupId>io.github.project-openubl</groupId>
+        <artifactId>xsender</artifactId>
+        <version>5.0.3-SNAPSHOT</version>
+    </dependency>
+</dependencies>
+```
+
+---
+
+## 1. Factura y Boleta de Venta
+
+Tanto la Factura como la Boleta de Venta se crean utilizando el objeto `Invoice` en XBuilder. La diferencia principal radica en el tipo de documento del cliente y en la información que se proporciona.
+
+### Usando XBuilder para crear el XML
+
+A continuación, se muestra un ejemplo de cómo crear una Factura. Para una Boleta, el proceso es similar, pero se deben ajustar los datos del cliente.
+
+```java
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog6;
+import io.github.project.openubl.xbuilder.content.models.common.Cliente;
+import io.github.project.openubl.xbuilder.content.models.common.Proveedor;
+import io.github.project.openubl.xbuilder.content.models.standard.general.DocumentoVentaDetalle;
+import io.github.project.openubl.xbuilder.content.models.standard.general.Invoice;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.enricher.config.Defaults;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class FacturaEjemplo {
+
+    public String crearFacturaXML() {
+        // Configuración de valores por defecto
+        Defaults defaults = Defaults.builder()
+                .icbTasa(new BigDecimal("0.2"))
+                .igvTasa(new BigDecimal("0.18"))
+                .build();
+
+        // Proveedor de fechas
+        DateProvider dateProvider = () -> LocalDate.now();
+
+        // Creación del objeto Invoice
+        Invoice invoice = Invoice.builder()
+            .serie("F001")
+            .numero(1)
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .cliente(Cliente.builder()
+                .nombre("Cliente de Ejemplo S.A.")
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString()) // RUC para Factura
+                .build())
+            .detalle(DocumentoVentaDetalle.builder()
+                .descripcion("Producto 1")
+                .cantidad(new BigDecimal("2"))
+                .precio(new BigDecimal("100"))
+                .build())
+            .detalle(DocumentoVentaDetalle.builder()
+                .descripcion("Producto 2")
+                .cantidad(new BigDecimal("3"))
+                .precio(new BigDecimal("50"))
+                .build())
+            .build();
+
+        // Enriquecer el contenido (cálculos automáticos)
+        ContentEnricher enricher = new ContentEnricher(defaults, dateProvider);
+        enricher.enrich(invoice);
+
+        // Generar el XML
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getInvoice().data(invoice).render();
+    }
+}
+```
+
+**Para una Boleta:**
+
+- Cambia el `tipoDocumentoIdentidad` del cliente a `Catalog6.DNI` o `Catalog6.OTROS`.
+- El `numeroDocumentoIdentidad` debe corresponder al tipo de documento.
+- La serie suele empezar con "B" (ej. "B001").
+
+### Usando XSender para enviar el documento
+
+Una vez que tienes el XML firmado, puedes enviarlo a la SUNAT.
+
+```java
+import io.github.project.openubl.xsender.company.CompanyCredentials;
+import io.github.project.openubl.xsender.company.CompanyURLs;
+import io.github.project.openubl.xsender.files.BillServiceXMLFileAnalyzer;
+import io.github.project.openubl.xsender.models.SunatResponse;
+import io.github.project.openubl.xsender.sunat.BillServiceDestination;
+import java.io.File;
+
+public class EnvioEjemplo {
+
+    public void enviarDocumento(File xmlFile) throws Exception {
+        // URLs de la SUNAT (beta o producción)
+        CompanyURLs companyURLs = CompanyURLs.builder()
+                .invoice("https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService")
+                .build();
+
+        // Credenciales de la empresa
+        CompanyCredentials credentials = CompanyCredentials.builder()
+                .username("TU_USUARIO_SOL")
+                .password("TU_CLAVE_SOL")
+                .build();
+
+        // Analizar el archivo XML
+        BillServiceXMLFileAnalyzer fileAnalyzer = new BillServiceXMLFileAnalyzer(xmlFile, companyURLs);
+        BillServiceDestination destination = fileAnalyzer.getSendFileDestination();
+
+        // Enviar el archivo
+        SunatResponse response = new StandaloneXSender(credentials).send(fileAnalyzer.getZipFile(), destination);
+
+        // Procesar la respuesta
+        if (response.getStatus() == SunatResponse.Status.ACEPTADO) {
+            System.out.println("Documento aceptado. CDR: " + response.getCdr());
+        } else {
+            System.out.println("Documento rechazado o con errores: " + response.getError());
+        }
+    }
+}
+```
+
+---
+
+## 2. Nota de Crédito
+
+Se utiliza para anular o corregir una Factura o Boleta emitida anteriormente.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog1;
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog6;
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog9;
+import io.github.project.openubl.xbuilder.content.models.common.Cliente;
+import io.github.project.openubl.xbuilder.content.models.common.Proveedor;
+import io.github.project.openubl.xbuilder.content.models.standard.general.CreditNote;
+import io.github.project.openubl.xbuilder.content.models.standard.general.DocumentoVentaDetalle;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+
+public class NotaCreditoEjemplo {
+
+    public String crearNotaCreditoXML() {
+        CreditNote creditNote = CreditNote.builder()
+            .serie("FC01")
+            .numero(1)
+            .comprobanteAfectadoSerieNumero("F001-1") // Serie y número del comprobante a modificar
+            .sustento("Anulación de la operación")
+            .tipoNotaCredito(Catalog9.ANULACION_DE_LA_OPERACION.getCode())
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .cliente(Cliente.builder()
+                .nombre("Cliente de Ejemplo S.A.")
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString())
+                .build())
+            .detalle(DocumentoVentaDetalle.builder()
+                .descripcion("Producto 1")
+                .cantidad(new BigDecimal("2"))
+                .precio(new BigDecimal("100"))
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(creditNote);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getCreditNote().data(creditNote).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío de una Nota de Crédito es idéntico al de una Factura o Boleta, utilizando el mismo `BillService`. XSender determina el endpoint correcto a partir del contenido del XML.
+
+---
+
+## 3. Nota de Débito
+
+Se utiliza para incrementar el valor de una Factura o Boleta emitida anteriormente.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog1;
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog6;
+import io.github.project.openubl.xbuilder.content.catalogs.Catalog10;
+import io.github.project.openubl.xbuilder.content.models.common.Cliente;
+import io.github.project.openubl.xbuilder.content.models.common.Proveedor;
+import io.github.project.openubl.xbuilder.content.models.standard.general.DebitNote;
+import io.github.project.openubl.xbuilder.content.models.standard.general.DocumentoVentaDetalle;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class NotaDebitoEjemplo {
+
+    public String crearNotaDebitoXML() {
+        DebitNote debitNote = DebitNote.builder()
+            .serie("FD01")
+            .numero(1)
+            .comprobanteAfectadoSerieNumero("F001-1") // Serie y número del comprobante a modificar
+            .sustento("Intereses por mora")
+            .tipoNotaDebito(Catalog10.INTERESES_POR_MORA.getCode())
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .cliente(Cliente.builder()
+                .nombre("Cliente de Ejemplo S.A.")
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString())
+                .build())
+            .detalle(DocumentoVentaDetalle.builder()
+                .descripcion("Intereses")
+                .cantidad(new BigDecimal("1"))
+                .precio(new BigDecimal("50"))
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(debitNote);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getDebitNote().data(debitNote).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío de una Nota de Débito también es idéntico al de una Factura.
+
+---
+## 4. Baja de Documentos (VoidedDocuments)
+
+Se utiliza para dar de baja Facturas o Boletas que fueron aceptadas por la SUNAT pero que, por algún motivo, no se concretaron.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.models.sunat.baja.VoidedDocuments;
+import io.github.project.openubl.xbuilder.content.models.sunat.baja.VoidedDocumentsItem;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.time.LocalDate;
+
+public class BajaEjemplo {
+
+    public String crearBajaXML() {
+        VoidedDocuments voidedDocuments = VoidedDocuments.builder()
+            .numero(1)
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .baja(VoidedDocumentsItem.builder()
+                .tipoComprobante("01") // 01: Factura, 03: Boleta
+                .serie("F001")
+                .numero(123)
+                .descripcion("Error en los datos")
+                .build())
+            .baja(VoidedDocumentsItem.builder()
+                .tipoComprobante("03")
+                .serie("B001")
+                .numero(456)
+                .descripcion("Cliente desistió de la compra")
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(voidedDocuments);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getVoidedDocuments().data(voidedDocuments).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío de una `VoidedDocuments` es un proceso asíncrono que devuelve un ticket. Debes consultar el estado del ticket para saber si la baja fue procesada correctamente.
+
+```java
+// El envío es similar al de una factura, pero la respuesta es un ticket
+SunatResponse response = new StandaloneXSender(credentials).send(zipFile, destination);
+String ticket = response.getTicket();
+
+// Luego, debes consultar el ticket
+SunatResponse ticketResponse = new StandaloneXSender(credentials).getTicket(ticket, destination);
+
+if (ticketResponse.getStatus() == SunatResponse.Status.ACEPTADO) {
+    System.out.println("Baja procesada correctamente.");
+} else {
+    System.out.println("Error al procesar la baja: " + ticketResponse.getError());
+}
+```
+
+---
+
+## 5. Resumen Diario (SummaryDocuments)
+
+Se utiliza para informar a la SUNAT sobre las Boletas de Venta y sus Notas de Crédito/Débito emitidas en un día.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.models.sunat.resumen.SummaryDocuments;
+import io.github.project.openubl.xbuilder.content.models.sunat.resumen.SummaryDocumentsItem;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class ResumenDiarioEjemplo {
+
+    public String crearResumenDiarioXML() {
+        SummaryDocuments summary = SummaryDocuments.builder()
+            .numero(1)
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .resumen(SummaryDocumentsItem.builder()
+                .tipoComprobante("03") // Boleta
+                .serie("B001")
+                .numero(1)
+                .tipoDocumentoIdentidadCliente(Catalog6.DNI.getCode())
+                .numeroDocumentoIdentidadCliente("12345678")
+                .importe(new BigDecimal("118"))
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(summary);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getSummaryDocuments().data(summary).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío del `SummaryDocuments` es idéntico al de `VoidedDocuments`. También es un proceso asíncrono y requiere la consulta de un ticket.
+
+---
+## 6. Percepción (Perception)
+
+Comprobante de percepción del IGV.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.models.sunat.percepcion.Perception;
+import io.github.project.openubl.xbuilder.content.models.sunat.percepcion.PerceptionComprobante;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class PercepcionEjemplo {
+
+    public String crearPercepcionXML() {
+        Perception perception = Perception.builder()
+            .serie("P001")
+            .numero(1)
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Agente de Percepción S.A.C.")
+                .build())
+            .cliente(Cliente.builder()
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString())
+                .nombre("Cliente S.A.")
+                .build())
+            .importeTotalPercibido(new BigDecimal("10"))
+            .comprobante(PerceptionComprobante.builder()
+                .tipoComprobante("01") // Factura
+                .serie("F001")
+                .numero("123")
+                .fechaEmision(LocalDate.now())
+                .importeTotal(new BigDecimal("100"))
+                .importePercibido(new BigDecimal("10"))
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(perception);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getPerception().data(perception).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío de Percepciones y Retenciones utiliza un endpoint diferente en la SUNAT.
+
+```java
+// Se debe especificar la URL para Percepciones/Retenciones
+CompanyURLs companyURLs = CompanyURLs.builder()
+        .perceptionRetention("https://e-beta.sunat.gob.pe/ol-ti-itemision-otroscpe-gem-beta/billService")
+        .build();
+
+// El resto del proceso de envío es similar al de una factura
+```
+
+---
+
+## 7. Retención (Retention)
+
+Comprobante de retención del IGV.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.models.sunat.retencion.Retention;
+import io.github.project.openubl.xbuilder.content.models.sunat.retencion.RetentionComprobante;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class RetencionEjemplo {
+
+    public String crearRetencionXML() {
+        Retention retention = Retention.builder()
+            .serie("R001")
+            .numero(1)
+            .proveedor(Proveedor.builder() // Quien emite la retención (Agente)
+                .ruc("12345678912")
+                .razonSocial("Agente de Retención S.A.C.")
+                .build())
+            .cliente(Cliente.builder() // A quien se le retiene
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString())
+                .nombre("Proveedor S.A.")
+                .build())
+            .importeTotalRetenido(new BigDecimal("30"))
+            .comprobante(RetentionComprobante.builder()
+                .tipoComprobante("01") // Factura
+                .serie("F002")
+                .numero("456")
+                .fechaEmision(LocalDate.now())
+                .importeTotal(new BigDecimal("1000"))
+                .importeRetenido(new BigDecimal("30"))
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(retention);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getRetention().data(retention).render();
+    }
+}
+```
+
+### Envío con XSender
+
+El envío de una Retención es idéntico al de una Percepción, utilizando el mismo endpoint `perceptionRetention`.
+
+---
+## 8. Guía de Remisión (DespatchDocument)
+
+Documento que sustenta el traslado de bienes.
+
+### Usando XBuilder para crear el XML
+
+```java
+import io.github.project.openubl.xbuilder.content.models.sunat.guia.Despatch;
+import io.github.project.openubl.xbuilder.content.models.sunat.guia.DespatchItem;
+import io.github.project.openubl.xbuilder.content.models.sunat.guia.Destinatario;
+import io.github.project.openubl.xbuilder.content.models.sunat.guia.Envio;
+import io.github.project.openubl.xbuilder.content.models.sunat.guia.Partida;
+import io.github.project.openubl.xbuilder.enricher.ContentEnricher;
+import io.github.project.openubl.xbuilder.renderer.TemplateProducer;
+import java.math.BigDecimal;
+
+public class GuiaRemisionEjemplo {
+
+    public String crearGuiaRemisionXML() {
+        Despatch despatch = Despatch.builder()
+            .serie("T001")
+            .numero(1)
+            .proveedor(Proveedor.builder()
+                .ruc("12345678912")
+                .razonSocial("Mi Empresa S.A.C.")
+                .build())
+            .envio(Envio.builder()
+                .partida(Partida.builder()
+                    .ubigeo("150101")
+                    .direccion("Av. Principal 123")
+                    .build())
+                .llegada(Partida.builder()
+                    .ubigeo("150102")
+                    .direccion("Av. Secundaria 456")
+                    .build())
+                .build())
+            .destinatario(Destinatario.builder()
+                .numeroDocumentoIdentidad("20123456789")
+                .tipoDocumentoIdentidad(Catalog6.RUC.toString())
+                .nombre("Destinatario S.A.")
+                .build())
+            .bien(DespatchItem.builder()
+                .cantidad(new BigDecimal("100"))
+                .descripcion("Cajas de Zapatos")
+                .unidadMedida("NIU")
+                .build())
+            .build();
+
+        ContentEnricher enricher = new ContentEnricher(new Defaults(), () -> LocalDate.now());
+        enricher.enrich(despatch);
+
+        TemplateProducer template = TemplateProducer.getInstance();
+        return template.getDespatch().data(despatch).render();
+    }
+}
+```
+
+### Envío con XSender
+
+La Guía de Remisión utiliza un endpoint de API REST más moderno.
+
+```java
+// URL para la Guía de Remisión
+CompanyURLs companyURLs = CompanyURLs.builder()
+        .despatch("https://api-cpe.sunat.gob.pe/v1/contribuyente/gem")
+        .build();
+
+// El envío requiere un proceso diferente que XSender maneja internamente
+// pero la llamada es similar a la de una factura.
+SunatResponse response = new StandaloneXSender(credentials).send(zipFile, destination);
+
+// La respuesta es síncrona
+if (response.getStatus() == SunatResponse.Status.ACEPTADO) {
+    System.out.println("Guía de Remisión aceptada.");
+} else {
+    System.out.println("Error: " + response.getError());
+}
+```
+
+## Conclusión
+
+Esta guía ha cubierto los aspectos básicos para la creación y envío de los principales documentos electrónicos de la SUNAT utilizando XBuilder y XSender. Para casos más complejos (e.g., diferentes tipos de impuestos, descuentos, cargos), consulta la documentación oficial de cada librería y los catálogos de la SUNAT.
