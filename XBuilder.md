@@ -9,6 +9,11 @@ XBuilder simplifica la generación de XML para los siguientes documentos UBL:
 *   **Factura (Invoice):** Comprobante de venta que detalla una transacción comercial.
 *   **Nota de Crédito (CreditNote):** Documento que anula o modifica una factura emitida anteriormente.
 *   **Nota de Débito (DebitNote):** Documento que incrementa el importe de una factura emitida anteriormente.
+*   **Resumen de Anulaciones (VoidedDocument):** Documento que se utiliza para anular boletas de venta o facturas.
+*   **Resumen Diario (SummaryDocuments):** Documento que se utiliza para enviar un resumen de las boletas de venta emitidas en un día.
+*   **Comprobante de Percepción (Perception):** Comprobante que emiten los agentes de percepción del IGV.
+*   **Comprobante de Retención (Retention):** Comprobante que emiten los agentes de retención del IGV.
+*   **Guía de Remisión (DespatchAdvice):** Documento que sustenta el traslado de bienes.
 
 La librería está diseñada para ser fácil de usar y se integra con proyectos de Quarkus.
 
@@ -60,54 +65,9 @@ public class Main {
 }
 ```
 
-### 2.2. Nota de Crédito (CreditNote)
+### 2.2. Otros Documentos
 
-Para crear una nota de crédito, se debe especificar el comprobante que se está modificando:
-
-```java
-import io.github.project.openubl.xbuilder.content.models.standard.general.CreditNote;
-import io.github.project.openubl.xbuilder.content.models.common.Cliente;
-import io.github.project.openubl.xbuilder.content.models.common.Proveedor;
-import io.github.project.openubl.xbuilder.content.models.standard.general.DocumentoVentaDetalle;
-import io.github.project.openubl.xbuilder.content.models.standard.general.BaseDocumentoTributarioRelacionado;
-
-import java.math.BigDecimal;
-import java.time.LocalDate;
-
-public class Main {
-
-    public static void main(String[] args) {
-        CreditNote creditNote = CreditNote.builder()
-                .serie("FC01")
-                .numero(1)
-                .fechaEmision(LocalDate.now())
-                .proveedor(Proveedor.builder()
-                        .ruc("12345678912")
-                        .razonSocial("Mi Empresa S.A.C.")
-                        .build()
-                )
-                .cliente(Cliente.builder()
-                        .ruc("98765432198")
-                        .razonSocial("Cliente S.A.")
-                        .build()
-                )
-                .comprobanteAfectado(BaseDocumentoTributarioRelacionado.builder()
-                        .serieNumero("F001-1")
-                        .build()
-                )
-                .detalle(DocumentoVentaDetalle.builder()
-                        .descripcion("Producto 1")
-                        .cantidad(new BigDecimal("10"))
-                        .precio(new BigDecimal("100"))
-                        .build()
-                )
-                .build();
-
-        // Generar el XML a partir del objeto CreditNote
-        // ...
-    }
-}
-```
+La creación de otros tipos de documentos sigue un patrón similar. Se debe crear un objeto del modelo correspondiente y llenar sus atributos. Por ejemplo, para crear una guía de remisión, se utilizaría el objeto `DespatchAdvice`.
 
 ## 3. Modelos de Datos
 
@@ -128,6 +88,8 @@ Algunos de los atributos más comunes en los modelos de datos son:
 
 XBuilder utiliza catálogos definidos por SUNAT para llenar ciertos campos de los documentos UBL. Estos catálogos se encuentran en el paquete `io.github.project.openubl.xbuilder.content.catalogs` y se utilizan para validar y autocompletar información.
 
+El uso de los catálogos es automático en la mayoría de los casos. XBuilder utiliza la información proporcionada en los modelos de datos para seleccionar el valor correcto del catálogo.
+
 Algunos de los catálogos más importantes son:
 
 *   **`Catalog1`:** Tipos de documento de identidad.
@@ -135,7 +97,19 @@ Algunos de los catálogos más importantes son:
 *   **`Catalog7`:** Tipos de afectación al IGV.
 *   **`Catalog8`:** Tipos de sistema de cálculo del ISC.
 
-## 4. Extensión de Quarkus
+## 4. Renderización de XML
+
+XBuilder utiliza el motor de plantillas Qute para generar el XML de los documentos UBL. Las plantillas se encuentran en el directorio `src/main/resources/Renderer` y tienen la extensión `.xml`.
+
+El proceso de renderización es el siguiente:
+
+1.  Se crea un objeto del modelo de datos (ej. `Invoice`).
+2.  Se pasa el objeto al motor de plantillas Qute.
+3.  Qute utiliza la plantilla correspondiente al tipo de documento para generar el XML.
+
+Este enfoque permite modificar las plantillas XML si es necesario, sin tener que modificar el código Java.
+
+## 5. Extensión de Quarkus
 
 XBuilder proporciona una extensión de Quarkus que facilita su integración en aplicaciones Quarkus. Para utilizar la extensión, se debe agregar la siguiente dependencia al archivo `pom.xml`:
 

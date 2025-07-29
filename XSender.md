@@ -13,6 +13,11 @@ XSender se encarga de la comunicación con los servicios web de la SUNAT para el
 *   **Resumen Diario de Boletas**
 *   **Comunicación de Baja**
 
+Además del envío de documentos, XSender también permite:
+
+*   **Consultar el estado de un ticket:** Para los envíos de resúmenes y comunicaciones de baja.
+*   **Consultar la validez de un comprobante:** Para verificar si un comprobante es válido en los registros de la SUNAT.
+
 La librería utiliza Apache Camel para gestionar las rutas y la comunicación con la SUNAT.
 
 ## 2. Envío de Documentos
@@ -70,21 +75,61 @@ public class Main {
 }
 ```
 
-## 3. Configuración
+## 3. Consulta de Tickets y Comprobantes
 
-### 3.1. Credenciales
+### 3.1. Consulta de Ticket
+
+Para consultar el estado de un ticket, se debe utilizar el destino `BillConsultServiceDestination`:
+
+```java
+// ...
+SunatRequest request = SunatRequest.builder()
+        .credentials(credentials)
+        .ticket("123456789") // Número de ticket
+        .destination(new BillConsultServiceDestination(urls.getConsult()))
+        .build();
+
+SunatResponse response = request.send();
+// ...
+```
+
+### 3.2. Consulta de Validez de Comprobante
+
+Para consultar la validez de un comprobante, se debe utilizar el destino `BillValidServiceDestination`:
+
+```java
+// ...
+SunatRequest request = SunatRequest.builder()
+        .credentials(credentials)
+        .document(SunatDocument.builder()
+            .ruc("12345678912")
+            .tipoComprobante("01")
+            .serie("F001")
+            .numero(1)
+            .build()
+        )
+        .destination(new BillValidServiceDestination(urls.getValid()))
+        .build();
+
+SunatResponse response = request.send();
+// ...
+```
+
+## 4. Configuración
+
+### 4.1. Credenciales
 
 Las credenciales de la empresa se configuran en el objeto `CompanyCredentials`. Se debe proporcionar el RUC, el usuario y la contraseña de la empresa.
 
-### 3.2. URLs de la SUNAT
+### 4.2. URLs de la SUNAT
 
 Las URLs de los servicios de la SUNAT se configuran en el objeto `CompanyURLs`. XSender proporciona URLs de prueba y producción, pero también se pueden especificar URLs personalizadas.
 
-## 4. Respuestas de la SUNAT
+## 5. Respuestas de la SUNAT
 
 XSender maneja las respuestas de la SUNAT y las encapsula en un objeto `SunatResponse`. Este objeto contiene el estado del envío, el CDR (Constancia de Recepción) y cualquier error que haya ocurrido.
 
-### 4.1. Estado del Envío
+### 5.1. Estado del Envío
 
 El estado del envío se puede obtener a través del método `getStatus()` del objeto `SunatResponse`. Los posibles estados son:
 
@@ -92,15 +137,19 @@ El estado del envío se puede obtener a través del método `getStatus()` del ob
 *   **`RECHAZADO`:** El documento fue rechazado por la SUNAT.
 *   **`ERROR`:** Ocurrió un error durante el envío del documento.
 
-### 4.2. CDR (Constancia de Recepción)
+### 5.2. CDR (Constancia de Recepción)
 
 El CDR es un archivo XML que contiene la constancia de recepción del documento por parte de la SUNAT. Se puede obtener a través del método `getCdr()` del objeto `SunatResponse`.
 
-## 5. Extensiones
+### 5.3. Manejo de Errores
+
+En caso de error, el objeto `SunatResponse` contendrá un objeto `SunatError` con información sobre el error. Se puede acceder a este objeto a través del método `getError()`.
+
+## 6. Extensiones
 
 XSender proporciona extensiones para facilitar su integración con los siguientes frameworks:
 
-### 5.1. Quarkus
+### 6.1. Quarkus
 
 Para utilizar XSender en un proyecto de Quarkus, se debe agregar la siguiente dependencia al archivo `pom.xml`:
 
@@ -112,7 +161,7 @@ Para utilizar XSender en un proyecto de Quarkus, se debe agregar la siguiente de
 </dependency>
 ```
 
-### 5.2. Spring Boot
+### 6.2. Spring Boot
 
 Para utilizar XSender en un proyecto de Spring Boot, se debe agregar la siguiente dependencia al archivo `pom.xml`:
 
